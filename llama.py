@@ -204,6 +204,13 @@ class Llama(nn.Module):
         self.params = params
         self.vocab_size = params.vocab_size
         self.n_layers = params.n_layers
+        self.dim = params.dim
+        self.n_heads = params.n_heads
+        self.n_kv_heads = params.n_kv_heads if params.n_kv_heads is not None else params.n_heads
+        hidden_dim = int(8 * self.dim / 3)
+        if params.ffn_dim_multiplier is not None:
+            hidden_dim = int(params.ffn_dim_multiplier * hidden_dim)
+        self.ffn_hidden_dim = params.multiple_of * ((hidden_dim + params.multiple_of - 1) // params.multiple_of)
 
         self.tok_embeddings = nn.Embedding(
             params.vocab_size, params.dim
@@ -265,6 +272,41 @@ class Llama(nn.Module):
 
         return optimizer
 
-    def estimate_mfu(self, fwdbwd_per_iter, dt):
-        # TODO add correct mfu estimation for swiglu
-        return 0.0
+    def estimate_mfu(self, bsz, seqlen, dt):
+        # modified from https://github.com/NVIDIA/Megatron-LM/blob/b1218b905bd4bed88c17bcee6ddd9bee0b5b3278/megatron/training/training.py#L98
+        # The 12x term below comes from the following factors; for more details, see
+        # "APPENDIX: FLOATING-POINT OPERATIONS" in https://arxiv.org/abs/2104.04473.
+        # - 3x: Each GEMM in the model needs to be performed 3 times (forward pass,
+        #       backward wgrad [weight gradient], backward dgrad [data gradient]).
+        # - 2x: GEMMs of a particular size are stacked twice in the standard Transformer model
+        #       architectures implemented in this codebase (e.g., h->ffn_h GEMM and ffn_h->h GEMM
+        #       in MLP layer).
+        # - 2x: A GEMM of a m*n tensor with a n*k tensor requires 2mnk floating-point operations.
+        gated_linear_multiplier = 3 / 2
+        expansion_factor = 3 * 2 * 2
+        flops = (
+            expansion_factor
+            * bsz
+            * seqlen
+            * self.n_layers
+            * self.dim
+            * self.dim
+            * (
+                # Attention.
+                (
+                    (
+                        1
+                        + (self.n_kv_heads / self.n_heads)
+                        + (seqlen / self.dim)
+                    )
+                )
+                # MLP.
+                + (
+                    (self.ffn_hidden_dim / self.dim)
+                    * gated_linear_multiplier
+                )
+                # Logit.
+                + (self.vocab_size / (2 * self.n_layers * self.dim))
+            )
+        )
+        return flops / 312e12 / dt
