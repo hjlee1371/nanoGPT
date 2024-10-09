@@ -327,11 +327,12 @@ while True:
         # scale up to undo the division above, approximating the true total loss (exact would have been a sum)
         ntp_loss_to_log = ntp_loss.item()
         z_loss_to_log = z_loss.item()
+        mfu = raw_model.estimate_mfu(batch_size * gradient_accumulation_steps, block_size, dt)
+        running_mfu = mfu if running_mfu == -1.0 else 0.9*running_mfu + 0.1*mfu
         tb_logger.add_scalar("train/ntp_loss", ntp_loss_to_log, iter_num)
         tb_logger.add_scalar("train/z_loss", z_loss_to_log, iter_num)
-        if local_iter_num >= 5: # let the training loop settle a bit
-            mfu = raw_model.estimate_mfu(batch_size * gradient_accumulation_steps, block_size, dt)
-            running_mfu = mfu if running_mfu == -1.0 else 0.9*running_mfu + 0.1*mfu
+        tb_logger.add_scalar("train/lr", lr, iter_num)
+        tb_logger.add_scalar("train/mfu", mfu, iter_num)
         print(f"iter {iter_num}: loss {ntp_loss_to_log:.4f}, z-loss {z_loss_to_log:.4f}, time {dt*1000:.2f}ms, mfu {running_mfu*100:.2f}%")
     iter_num += 1
     local_iter_num += 1
