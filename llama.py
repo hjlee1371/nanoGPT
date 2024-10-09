@@ -231,7 +231,7 @@ class Llama(nn.Module):
             self.params.dim // self.params.n_heads, self.params.max_seq_len * 2
         )
 
-    def forward(self, tokens, targets, z_loss):
+    def forward(self, tokens, targets, z_loss_coeff):
         _bsz, seqlen = tokens.shape
         h = self.tok_embeddings(tokens)
         self.freqs_cis = self.freqs_cis.to(h.device)
@@ -243,7 +243,7 @@ class Llama(nn.Module):
         h = self.norm(h)
         output = self.output(h).float()
         ntp_loss = F.cross_entropy(output.view(-1, output.size(-1)), targets.view(-1), ignore_index=-1)
-        z_loss = z_loss * torch.logsumexp(output, dim=-1).square().sum()
+        z_loss = z_loss_coeff * torch.logsumexp(output, dim=-1).square().mean()
         return output, ntp_loss, z_loss
 
     def configure_optimizers(self, weight_decay, learning_rate, betas, device_type):
