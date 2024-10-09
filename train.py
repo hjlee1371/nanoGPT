@@ -45,9 +45,9 @@ wandb_log = False
 wandb_project = 'small-scale-proxy'
 wandb_run_name = 'baseline' # 'run' + str(time.time())
 # data
-dataset = 'openwebtext'
-gradient_accumulation_steps = 16 # used to simulate larger batch sizes
-batch_size = 16 # if gradient_accumulation_steps > 1, this is the micro-batch size
+dataset = 'openwebtext-10k'
+gradient_accumulation_steps = 8 # used to simulate larger batch sizes
+batch_size = 32 # if gradient_accumulation_steps > 1, this is the micro-batch size
 block_size = 512
 # model
 base_n_layer = 6
@@ -165,8 +165,8 @@ if init_from == 'scratch':
     print("Initializing a new model from scratch")
     # determine the vocab size we'll use for from-scratch training
     if meta_vocab_size is None:
-        print("defaulting to vocab_size of GPT-2 to 50304 (50257 rounded up for efficiency)")
-    model_args['vocab_size'] = meta_vocab_size if meta_vocab_size is not None else 50304
+        print("defaulting to vocab_size of llama2 to 32000")
+    model_args['vocab_size'] = meta_vocab_size if meta_vocab_size is not None else 32000
     gptconf = config_cls(**model_args)
     model = model_cls(gptconf)
 elif init_from == 'resume':
