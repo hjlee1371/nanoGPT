@@ -24,6 +24,7 @@ class LlamaConfig:
     multiple_of: int = 256  # make SwiGLU hidden layer size multiple of large power of 2
     ffn_dim_multiplier: Optional[float] = None
     norm_eps: float = 1e-5
+    qk_norm: bool = False
 
     max_batch_size: int = 32
     max_seq_len: int = 2048
@@ -91,6 +92,8 @@ class Attention(nn.Module):
         self.n_kv_heads = args.n_heads if args.n_kv_heads is None else args.n_kv_heads
         self.n_rep = self.n_heads // self.n_kv_heads
         self.head_dim = args.dim // args.n_heads
+        self.q_norm = RMSNorm(args.dim, eps=args.norm_eps) if args.qk_norm else nn.Identity()
+        self.k_norm = RMSNorm(args.dim, eps=args.norm_eps) if args.qk_norm else nn.Identity()
 
         self.wq = nn.Linear(
             args.dim,
@@ -121,6 +124,8 @@ class Attention(nn.Module):
     ):
         bsz, seqlen, _ = x.shape
         xq, xk, xv = self.wq(x), self.wk(x), self.wv(x)
+        xq = self.q_norm(xq)
+        xk = self.k_norm(xk)
 
         xq = xq.view(bsz, seqlen, self.n_heads, self.head_dim)
         xk = xk.view(bsz, seqlen, self.n_kv_heads, self.head_dim)
