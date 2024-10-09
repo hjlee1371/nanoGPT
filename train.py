@@ -63,7 +63,7 @@ independent_weight_decay = True
 beta1 = 0.9
 beta2 = 0.95
 grad_clip = 1.0 # clip gradients at this value, or disable if == 0.0
-z_loss = 1e-4
+z_loss_coeff = 1e-4
 # learning rate decay settings
 decay_lr = True # whether to decay the learning rate
 warmup_iters = 5000 # how many steps to warm up for
@@ -213,18 +213,22 @@ if ddp:
 # helps estimate an arbitrarily accurate loss over either split using many batches
 @torch.no_grad()
 def estimate_loss():
-    out = {}
+    ntp_out = {}
+    z_out = {}
     model.eval()
     for split in ['train', 'val']:
-        losses = torch.zeros(eval_iters)
+        ntp_losses = torch.zeros(eval_iters)
+        z_losses = torch.zeros(eval_iters)
         for k in range(eval_iters):
             X, Y = get_batch(split)
             with ctx:
-                logits, loss = model(X, Y, z_loss)
-            losses[k] = loss.item()
-        out[split] = losses.mean()
+                logits, ntp_loss, z_loss = model(X, Y, z_loss_coeff)
+            ntp_losses[k] = ntp_loss.item()
+            z_losses[k] = z_loss.item()
+        ntp_out[split] = ntp_losses.mean()
+        z_out[split] = z_losses.mean()
     model.train()
-    return out
+    return ntp_out, z_out
 
 # learning rate decay scheduler (cosine with warmup)
 def get_lr(it):
@@ -261,13 +265,15 @@ while True:
 
     # evaluate the loss on train/val sets and write checkpoints
     if iter_num % eval_interval == 0 and master_process:
-        losses = estimate_loss()
-        print(f"step {iter_num}: train loss {losses['train']:.4f}, val loss {losses['val']:.4f}")
+        losses, z_losses = estimate_loss()
+        print(f"step {iter_num}: train loss {losses['train']:.4f}, train z-loss {z_losses['train']:.4f}, val loss {losses['val']:.4f}, val z-loss {z_losses['val']:.4f}")
         if wandb_log:
             wandb.log({
                 "iter": iter_num,
                 "train/loss": losses['train'],
+                "train/z-loss": z_losses['train'],
                 "val/loss": losses['val'],
+                "val/z-loss": z_losses['val'],
                 "lr": lr,
                 "mfu": running_mfu*100, # convert to percentage
             })
@@ -297,7 +303,8 @@ while True:
             # looking at the source of that context manager, it just toggles this variable
             model.require_backward_grad_sync = (micro_step == gradient_accumulation_steps - 1)
         with ctx:
-            logits, loss = model(X, Y, z_loss)
+            logits, ntp_loss, z_loss = model(X, Y, z_loss_coeff)
+            loss = ntp_loss + z_loss
             loss = loss / gradient_accumulation_steps # scale the loss to account for gradient accumulation
         # immediately async prefetch next batch while model is doing the forward pass on the GPU
         X, Y = get_batch('train')
@@ -318,12 +325,14 @@ while True:
     if iter_num % log_interval == 0 and master_process:
         # get loss as float. note: this is a CPU-GPU sync point
         # scale up to undo the division above, approximating the true total loss (exact would have been a sum)
-        lossf = loss.item() * gradient_accumulation_steps
-        tb_logger.add_scalar("loss/train", lossf, iter_num)
+        ntp_loss_to_log = ntp_loss.item()
+        z_loss_to_log = z_loss.item()
+        tb_logger.add_scalar("train/ntp_loss", ntp_loss_to_log, iter_num)
+        tb_logger.add_scalar("train/z_loss", z_loss_to_log, iter_num)
         if local_iter_num >= 5: # let the training loop settle a bit
             mfu = raw_model.estimate_mfu(batch_size * gradient_accumulation_steps, block_size, dt)
             running_mfu = mfu if running_mfu == -1.0 else 0.9*running_mfu + 0.1*mfu
-        print(f"iter {iter_num}: loss {lossf:.4f}, time {dt*1000:.2f}ms, mfu {running_mfu*100:.2f}%")
+        print(f"iter {iter_num}: loss {ntp_loss_to_log:.4f}, z-loss {z_loss_to_log:.4f}, time {dt*1000:.2f}ms, mfu {running_mfu*100:.2f}%")
     iter_num += 1
     local_iter_num += 1
 

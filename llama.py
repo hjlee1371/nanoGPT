@@ -242,9 +242,9 @@ class Llama(nn.Module):
             h = layer(h, start_pos, freqs_cis)
         h = self.norm(h)
         output = self.output(h).float()
-        loss = F.cross_entropy(output.view(-1, output.size(-1)), targets.view(-1), ignore_index=-1)
-        loss += z_loss * torch.logsumexp(output, dim=-1).square().sum()
-        return output, loss
+        ntp_loss = F.cross_entropy(output.view(-1, output.size(-1)), targets.view(-1), ignore_index=-1)
+        z_loss = z_loss * torch.logsumexp(output, dim=-1).square().sum()
+        return output, ntp_loss, z_loss
 
     def configure_optimizers(self, weight_decay, learning_rate, betas, device_type):
         # start with all of the candidate parameters
