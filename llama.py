@@ -230,6 +230,16 @@ class Llama(nn.Module):
             # Adding this multiplier instead of using 4096 directly allows for dynamism of token lengths while training or fine-tuning.
             self.params.dim // self.params.n_heads, self.params.max_seq_len * 2
         )
+        self.apply(self._init_weights)
+
+    def _init_weights(self, module):
+        if isinstance(module, nn.Linear):
+            assert module.weight.ndim == 2
+            assert module.bias is None
+            fan_in = module.weight.size(1)
+            torch.nn.init.trunc_normal_(module.weight, mean=0.0, std=1./math.sqrt(fan_in))
+        elif isinstance(module, nn.Embedding):
+            torch.nn.init.normal_(module.weight, mean=0.0, std=1./math.sqrt(self.dim))
 
     def forward(self, tokens, targets, z_loss_coeff):
         _bsz, seqlen = tokens.shape
