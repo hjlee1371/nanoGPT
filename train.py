@@ -55,6 +55,7 @@ base_n_head = 8
 base_n_embd = 512
 scale_factor = 1
 dropout = 0.0 # for pretraining 0 is good, for finetuning try 0.1+
+qk_norm = False
 # adamw optimizer
 learning_rate = 1e-4 # max learning rate
 max_iters = 100000 # total number of training iterations
@@ -155,8 +156,14 @@ if os.path.exists(meta_path):
     print(f"found vocab_size = {meta_vocab_size} (inside {meta_path})")
 
 # model init
-model_args = dict(n_layers=n_layer, n_heads=n_head, dim=n_embd, max_seq_len=block_size,
-                  vocab_size=None) # start with model_args from command line
+model_args = dict(
+    n_layers=n_layer,
+    n_heads=n_head,
+    dim=n_embd,
+    max_seq_len=block_size,
+    qk_norm=qk_norm,
+    vocab_size=None,
+)
 
 config_cls = LlamaConfig
 model_cls = Llama
