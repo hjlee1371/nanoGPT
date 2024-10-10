@@ -252,10 +252,11 @@ def get_lr(it):
     return min_lr + coeff * (learning_rate - min_lr)
 
 # logging
-tb_logger = SummaryWriter(log_dir=out_dir)
-if wandb_log and master_process:
-    import wandb
-    wandb.init(project=wandb_project, name=wandb_run_name, config=config)
+if master_process:
+    tb_logger = SummaryWriter(log_dir=out_dir)
+    if wandb_log:
+        import wandb
+        wandb.init(project=wandb_project, name=wandb_run_name, config=config)
 
 # training loop
 X, Y = get_batch('train') # fetch the very first batch
