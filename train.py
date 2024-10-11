@@ -54,6 +54,7 @@ base_n_layer = 6
 base_n_head = 8
 base_n_embd = 512
 scale_factor = 1
+parametrization = "sp" # sp or mup-simple
 dropout = 0.0 # for pretraining 0 is good, for finetuning try 0.1+
 qk_norm = False
 # adamw optimizer
@@ -84,10 +85,8 @@ config = {k: globals()[k] for k in config_keys} # will be useful for logging
 n_layer = base_n_layer * scale_factor
 n_head = base_n_head * scale_factor
 n_embd = base_n_embd * scale_factor
-if independent_weight_decay:
-    # some hack to use independent weight decay with pytorch optims
-    weight_decay = weight_decay / learning_rate
 assert dtype == 'bfloat16', "does not support fp16 training with grad scaling"
+assert parametrization in ["sp", "mup-simple"], f"{parametrization} parametrization not supported"
 # -----------------------------------------------------------------------------
 
 # various inits, derived attributes, I/O setup
@@ -162,6 +161,8 @@ model_args = dict(
     dim=n_embd,
     max_seq_len=block_size,
     qk_norm=qk_norm,
+    scale_factor=scale_factor,
+    parametrization=parametrization,
     vocab_size=None,
 )
 
@@ -202,7 +203,13 @@ elif init_from == 'resume':
 model.to(device)
 
 # optimizer
-optimizer = model.configure_optimizers(weight_decay, learning_rate, (beta1, beta2), device_type)
+optimizer = model.configure_optimizers(
+    weight_decay,
+    independent_weight_decay,
+    learning_rate,
+    (beta1, beta2),
+    device_type
+)
 if init_from == 'resume':
     optimizer.load_state_dict(checkpoint['optimizer'])
 checkpoint = None # free up memory

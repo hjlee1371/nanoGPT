@@ -26,6 +26,9 @@ class LlamaConfig:
     norm_eps: float = 1e-5
     qk_norm: bool = False
 
+    scale_factor: int = 1
+    parametrization: str = "sp"
+
     max_batch_size: int = 32
     max_seq_len: int = 2048
 
@@ -217,6 +220,9 @@ class Llama(nn.Module):
             hidden_dim = int(params.ffn_dim_multiplier * hidden_dim)
         self.ffn_hidden_dim = params.multiple_of * ((hidden_dim + params.multiple_of - 1) // params.multiple_of)
 
+        self.scale_factor = params.scale_factor
+        self.parametrization = params.parametrization
+
         self.tok_embeddings = nn.Embedding(
             params.vocab_size, params.dim
         )
@@ -261,19 +267,51 @@ class Llama(nn.Module):
         z_loss = z_loss_coeff * torch.logsumexp(output, dim=-1).square().mean()
         return output, ntp_loss, z_loss
 
-    def configure_optimizers(self, weight_decay, learning_rate, betas, device_type):
+    def configure_optimizers(self, weight_decay, independent_weight_decay, learning_rate, betas, device_type):
         # start with all of the candidate parameters
+        # some hack to use independent weight decay with pytorch optims
+        weight_decay = weight_decay / learning_rate if independent_weight_decay else weight_decay
         param_dict = {pn: p for pn, p in self.named_parameters()}
         # filter out those that do not require grad
         param_dict = {pn: p for pn, p in param_dict.items() if p.requires_grad}
         # create optim groups. Any parameters that is 2D will be weight decayed, otherwise no.
         # i.e. all weight tensors in matmuls + embeddings decay, all biases and layernorms don't.
-        decay_params = [p for n, p in param_dict.items() if p.dim() >= 2]
+        embed_params = [p for n, p in param_dict.items() if p.dim() >= 2 and n.endswith("tok_embeddings.weight")]
+        decay_params = [p for n, p in param_dict.items() if p.dim() >= 2 and not n.endswith("tok_embeddings.weight")]
         nodecay_params = [p for n, p in param_dict.items() if p.dim() < 2]
-        optim_groups = [
-            {'params': decay_params, 'weight_decay': weight_decay},
-            {'params': nodecay_params, 'weight_decay': 0.0}
-        ]
+        if self.parametrization == "sp":
+            optim_groups = [
+                {
+                    'params': embed_params,
+                    'weight_decay': weight_decay,
+                },
+                {
+                    'params': decay_params,
+                    'weight_decay': weight_decay,
+                },
+                {
+                    'params': nodecay_params,
+                    'weight_decay': 0.0,
+                }
+            ]
+        elif self.parametrization == "mup-simple":
+            optim_groups = [
+                {
+                    'params': embed_params,
+                    'weight_decay': weight_decay,
+                },
+                {
+                    'params': decay_params,
+                    'lr': learning_rate / self.scale_factor,
+                    # Weight decay should scale once more for mup w/ independent_weight_decay
+                    # See https://github.com/microsoft/mup/issues/1 for details
+                    'weight_decay': weight_decay * self.scale_factor if independent_weight_decay else weight_decay,
+                },
+                {
+                    'params': nodecay_params,
+                    'weight_decay': 0.0,
+                }
+            ]
         num_decay_params = sum(p.numel() for p in decay_params)
         num_nodecay_params = sum(p.numel() for p in nodecay_params)
         print(f"num decayed parameter tensors: {len(decay_params)}, with {num_decay_params:,} parameters")
