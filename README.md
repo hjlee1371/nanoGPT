@@ -2,14 +2,14 @@
 
 - Unofficial implementation of [Small-scale proxies for large-scale Transformer training instabilities](https://arxiv.org/abs/2309.14322) built with pytorch, [nanoGPT](https://github.com/karpathy/nanoGPT), and llama architecture/tokenizer.
 - Features checklist
-- [x] z-loss
-- [x] qk-norm (w/ model dim)
-- [x] independent weight decay
-- [x] truncated normal initialization
-- [x] mup-simple
-- [ ] mup-full
-- [ ] qk-norm w/ head dim
-- [ ] mixture of experts
+  - [x] z-loss
+  - [x] qk-norm (w/ model dim)
+  - [x] independent weight decay
+  - [x] truncated normal initialization
+  - [x] mup-simple
+  - [ ] mup-full
+  - [ ] qk-norm w/ head dim
+  - [ ] mixture of experts
 
 ---
 
