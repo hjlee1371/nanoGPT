@@ -1,5 +1,8 @@
-
 # nanoGPT
+
+Unofficial implementation of [Small-scale proxies for large-scale Transformer training instabilities](https://arxiv.org/abs/2309.14322) built with pytorch, [nanoGPT](https://github.com/karpathy/nanoGPT), and llama architecture/tokenizer.
+
+---
 
 ![nanoGPT](assets/nanogpt.jpg)
 
