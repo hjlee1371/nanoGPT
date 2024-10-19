@@ -57,6 +57,8 @@ scale_factor = 1
 parametrization = "sp" # sp or mup-simple
 dropout = 0.0 # for pretraining 0 is good, for finetuning try 0.1+
 qk_norm = False
+num_total_experts = 1
+num_active_experts = 1
 # adamw optimizer
 learning_rate = 1e-4 # max learning rate
 max_iters = 100000 # total number of training iterations
@@ -161,6 +163,8 @@ model_args = dict(
     dim=n_embd,
     max_seq_len=block_size,
     qk_norm=qk_norm,
+    num_total_experts=num_total_experts,
+    num_active_experts=num_active_experts,
     scale_factor=scale_factor,
     parametrization=parametrization,
     vocab_size=None,
