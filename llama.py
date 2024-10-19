@@ -15,6 +15,7 @@ from torch import nn
 
 from grouped_gemm.ops import permute, unpermute
 from wrapped_gmm import gmm
+from utils import apply_aux_loss
 
 @dataclass
 class LlamaConfig:
@@ -33,6 +34,7 @@ class LlamaConfig:
 
     num_total_experts: int = 1
     num_active_experts: int = 1
+    aux_loss_coeff: float = 1e-2 # from switch transformer
 
     max_batch_size: int = 32
     max_seq_len: int = 2048
@@ -213,6 +215,7 @@ class MoEFeedForward(nn.Module):
         multiple_of: int,
         num_total_experts: int,
         num_active_experts: int,
+        aux_loss_coeff: float,
         ffn_dim_multiplier: Optional[float],
     ):
         super().__init__()
@@ -227,6 +230,7 @@ class MoEFeedForward(nn.Module):
         assert hidden_dim % 8 == 0
         self.num_total_experts = num_total_experts
         self.num_active_experts = num_active_experts
+        self.aux_loss_coeff = aux_loss_coeff
 
         self.router = nn.Linear(dim, num_total_experts, bias=None)
         self.w1 = GroupedLinear(
@@ -249,8 +253,14 @@ class MoEFeedForward(nn.Module):
             bins=self.num_total_experts,
             min=0,
             max=self.num_total_experts - 1,
-        ).to(torch.long).cpu()
+        ).to(torch.long)
+        probs_per_expert = scores.sum(dim=0)
+        aux_loss = torch.sum(probs_per_expert * num_tokens_per_expert)
+        aux_loss *= self.aux_loss_coeff * self.num_total_experts / (bsz * seqlen) ** 2 / self.num_active_experts
+        expert_weights = apply_aux_loss(expert_weights, aux_loss)
         expert_indices = expert_indices.to(torch.int32)
+
+        num_tokens_per_expert = num_tokens_per_expert.cpu()
         x, row_id_map = permute(x, expert_indices)
         x = self.w2(
             F.silu(self.w1(x, num_tokens_per_expert)) * self.w3(x, num_tokens_per_expert),
@@ -275,6 +285,7 @@ class TransformerBlock(nn.Module):
                 ffn_dim_multiplier=args.ffn_dim_multiplier,
                 num_total_experts=args.num_total_experts,
                 num_active_experts=args.num_active_experts,
+                aux_loss_coeff=args.aux_loss_coeff,
             )
         else:
             self.feed_forward = FeedForward(
