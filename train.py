@@ -29,6 +29,7 @@ from torch.distributed import init_process_group, destroy_process_group
 from torch.utils.tensorboard import SummaryWriter
 
 from llama import LlamaConfig, Llama
+from deepseekv2 import DeepseekV2Config, DeepseekV2
 
 # -----------------------------------------------------------------------------
 # default config values following https://arxiv.org/abs/2309.14322
@@ -50,6 +51,7 @@ gradient_accumulation_steps = 8 # used to simulate larger batch sizes
 batch_size = 32 # if gradient_accumulation_steps > 1, this is the micro-batch size
 block_size = 512
 # model
+arch = "llama"
 base_n_layer = 6
 base_n_head = 8
 base_n_embd = 512
@@ -59,6 +61,11 @@ dropout = 0.0 # for pretraining 0 is good, for finetuning try 0.1+
 qk_norm = False
 num_total_experts = 1
 num_active_experts = 1
+# deepseekv2 args
+q_lora_rank = 256
+kv_lora_rank = 256
+nope_head_dim = 64
+rope_head_dim = 32
 # adamw optimizer
 learning_rate = 1e-4 # max learning rate
 max_iters = 100000 # total number of training iterations
@@ -170,8 +177,19 @@ model_args = dict(
     vocab_size=None,
 )
 
-config_cls = LlamaConfig
-model_cls = Llama
+if arch == "llama":
+    config_cls = LlamaConfig
+    model_cls = Llama
+elif arch == "deepseekv2":
+    config_cls = DeepseekV2Config
+    model_cls = DeepseekV2
+    model_args['q_lora_rank'] = q_lora_rank
+    model_args['kv_lora_rank'] = kv_lora_rank
+    model_args['nope_head_dim'] = nope_head_dim
+    model_args['rope_head_dim'] = rope_head_dim
+else:
+    raise ValueError
+
 if init_from == 'scratch':
     # init a new model from scratch
     print("Initializing a new model from scratch")
