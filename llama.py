@@ -13,9 +13,7 @@ import torch
 import torch.nn.functional as F
 from torch import nn
 
-from grouped_gemm.ops import permute, unpermute
-from wrapped_gmm import gmm
-from utils import apply_aux_loss
+import moe_ops
 
 @dataclass
 class LlamaConfig:
@@ -183,30 +181,6 @@ class FeedForward(nn.Module):
         return self.w2(F.silu(self.w1(x)) * self.w3(x))
 
 
-class GroupedLinear(nn.Module):
-    def __init__(
-        self,
-        num_experts: int,
-        in_features: int,
-        out_features: int,
-    ):
-        super().__init__()
-        self.weight = nn.Parameter(
-            torch.empty(
-                num_experts,
-                in_features,
-                out_features,
-            )
-        )
-
-    def forward(self, x, batch_sizes):
-        return gmm(
-            x.bfloat16(),
-            self.weight.bfloat16(),
-            batch_sizes,
-        ).float()
-
-
 class MoEFeedForward(nn.Module):
     def __init__(
         self,
@@ -228,6 +202,7 @@ class MoEFeedForward(nn.Module):
         assert hidden_dim % num_active_experts == 0
         hidden_dim = hidden_dim // num_active_experts
         assert hidden_dim % 8 == 0
+        self.hidden_dim = hidden_dim
         self.num_total_experts = num_total_experts
         self.num_active_experts = num_active_experts
         self.aux_loss_coeff = aux_loss_coeff
@@ -248,25 +223,22 @@ class MoEFeedForward(nn.Module):
         x = x.view(-1, dim)
         scores = F.softmax(self.router(x), dim=-1)
         expert_weights, expert_indices = torch.topk(scores, self.num_active_experts, dim=-1)
-        num_tokens_per_expert = torch.histc(
-            expert_indices,
-            bins=self.num_total_experts,
-            min=0,
-            max=self.num_total_experts - 1,
-        ).to(torch.long)
-        probs_per_expert = scores.sum(dim=0)
-        aux_loss = torch.sum(probs_per_expert * num_tokens_per_expert)
-        aux_loss *= self.aux_loss_coeff * self.num_total_experts / (bsz * seqlen) ** 2 / self.num_active_experts
-        expert_weights = apply_aux_loss(expert_weights, aux_loss)
-        expert_indices = expert_indices.to(torch.int32)
+        expert_weights = expert_weights.flatten()
+        expert_indices = expert_indices.int().flatten()
+        with torch.no_grad():
+            bin_ids, indices = torch.sort(expert_indices)
+            num_tokens_per_expert = torch.histc(expert_indices, self.num_total_experts)
+            bins = torch.cumsum(num_tokens_per_expert, 0)
+            bin_ids = bin_ids.int()
+            bins = bins.int()
 
-        num_tokens_per_expert = num_tokens_per_expert.cpu()
-        x, row_id_map = permute(x, expert_indices)
-        x = self.w2(
-            F.silu(self.w1(x, num_tokens_per_expert)) * self.w3(x, num_tokens_per_expert),
-            num_tokens_per_expert,
-        )
-        x = unpermute(x, row_id_map, expert_weights)
+        num_tokens_per_expert = num_tokens_per_expert.cpu().to(torch.long)
+        x = moe_ops.gather(x, indices, bin_ids, bins, self.num_active_experts)
+        x = F.silu(
+            moe_ops.gmm(x, self.w1.weight, num_tokens_per_expert)
+        ) * moe_ops.gmm(x, self.w3.weight, num_tokens_per_expert)
+        x = moe_ops.gmm(x, self.w2.weight, num_tokens_per_expert)
+        x = moe_ops.scatter(x, indices, bin_ids, expert_weights, bins, self.num_active_experts)
         return x.view(bsz, seqlen, dim)
 
 

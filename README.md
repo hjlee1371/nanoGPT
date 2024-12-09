@@ -1,7 +1,7 @@
 # nanoGPT
 
 - Unofficial implementation of [Small-scale proxies for large-scale Transformer training instabilities](https://arxiv.org/abs/2309.14322) built with pytorch, [nanoGPT](https://github.com/karpathy/nanoGPT), and llama architecture/tokenizer.
-- Run `pip install --verbose git+https://github.com/fanshiqing/grouped_gemm@main` to train mixture of experts
+- Run `pip install megablocks grouped_gemm` to train mixture of experts models
 - Features checklist
   - [x] z-loss
   - [x] qk-norm (w/ model dim)
