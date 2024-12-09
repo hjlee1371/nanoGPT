@@ -208,14 +208,14 @@ class MoEFeedForward(nn.Module):
         self.aux_loss_coeff = aux_loss_coeff
 
         self.router = nn.Linear(dim, num_total_experts, bias=None)
-        self.w1 = GroupedLinear(
-            num_total_experts, dim, hidden_dim
+        self.w1 = nn.Parameter(
+            torch.empty(num_total_experts, dim, hidden_dim)
         )
-        self.w2 = GroupedLinear(
-            num_total_experts, hidden_dim, dim
+        self.w2 = nn.Parameter(
+            torch.empty(num_total_experts, hidden_dim, dim)
         )
-        self.w3 = GroupedLinear(
-            num_total_experts, dim, hidden_dim
+        self.w3 = nn.Parameter(
+            torch.empty(num_total_experts, dim, hidden_dim)
         )
 
     def forward(self, x):
@@ -235,9 +235,9 @@ class MoEFeedForward(nn.Module):
         num_tokens_per_expert = num_tokens_per_expert.cpu().to(torch.long)
         x = moe_ops.gather(x, indices, bin_ids, bins, self.num_active_experts)
         x = F.silu(
-            moe_ops.gmm(x, self.w1.weight, num_tokens_per_expert)
-        ) * moe_ops.gmm(x, self.w3.weight, num_tokens_per_expert)
-        x = moe_ops.gmm(x, self.w2.weight, num_tokens_per_expert)
+            moe_ops.gmm(x, self.w1, num_tokens_per_expert)
+        ) * moe_ops.gmm(x, self.w3, num_tokens_per_expert)
+        x = moe_ops.gmm(x, self.w2, num_tokens_per_expert)
         x = moe_ops.scatter(x, indices, bin_ids, expert_weights, bins, self.num_active_experts)
         return x.view(bsz, seqlen, dim)
 
@@ -326,10 +326,14 @@ class Llama(nn.Module):
             assert module.bias is None
             fan_in = module.weight.size(1)
             torch.nn.init.trunc_normal_(module.weight, mean=0.0, std=1./math.sqrt(fan_in))
-        if isinstance(module, GroupedLinear):
-            assert module.weight.ndim == 3
-            fan_in = module.weight.size(1)
-            torch.nn.init.trunc_normal_(module.weight, mean=0.0, std=1./math.sqrt(fan_in))
+        if isinstance(module, MoEFeedForward):
+            assert module.w1.ndim == 3
+            assert module.w2.ndim == 3
+            assert module.w3.ndim == 3
+            _, dim, hidden_dim = module.w1.shape
+            torch.nn.init.trunc_normal_(module.w1, mean=0.0, std=1./math.sqrt(dim))
+            torch.nn.init.trunc_normal_(module.w3, mean=0.0, std=1./math.sqrt(dim))
+            torch.nn.init.trunc_normal_(module.w2, mean=0.0, std=1./math.sqrt(hidden_dim))
         elif isinstance(module, nn.Embedding):
             torch.nn.init.normal_(module.weight, mean=0.0, std=1./math.sqrt(self.dim))
 
